@@ -33,11 +33,26 @@ public class HaulTrackerTests
         var t = StartedRun();
         t.StateChanging(RunScreen.RunOver, Run, Haul);
 
-        // Retry pressed: the game wipes its run data and enters the level before laying it out.
-        t.Observe(Run, Zero);
+        // Loading closes observation before the game clears its run data.
         t.StateChanging(RunScreen.Loading, Run, Zero);
+        t.Observe(Run, Zero);
 
         Assert.Equal(Haul, t.FloorLoading(FloorLoad.Retry));
+    }
+
+    [Fact]
+    public void GameOverHaul_ContinuesUpdatingUntilLoading()
+    {
+        var t = StartedRun();
+        var finalHaul = new[] { 170, 3, 8, 1 };
+        t.StateChanging(RunScreen.RunOver, Run, Haul);
+
+        t.Observe(Run, finalHaul);
+        Assert.Equal(finalHaul, t.Haul);
+
+        t.StateChanging(RunScreen.Loading, Run, Zero);
+        t.Observe(Run, Zero);
+        Assert.Equal(finalHaul, t.Haul);
     }
 
     [Fact]
@@ -96,6 +111,20 @@ public class HaulTrackerTests
         t.StateChanging(RunScreen.RunOver, Run + 1, new[] { 3, 0, 0, 0 });
 
         Assert.Equal(new[] { 3, 0, 0, 0 }, t.FloorLoading(FloorLoad.Retry));
+    }
+
+    [Fact]
+    public void ReturningToBase_ClearsTheEndedRun()
+    {
+        var t = StartedRun();
+        t.StateChanging(RunScreen.RunOver, Run, Haul);
+
+        t.ReturnedToBase();
+
+        Assert.False(t.IsLive);
+        Assert.False(t.RunEnded);
+        Assert.Equal(Array.Empty<int>(), t.Haul);
+        Assert.Null(t.FloorLoading(FloorLoad.NewRun));
     }
 
     [Fact]

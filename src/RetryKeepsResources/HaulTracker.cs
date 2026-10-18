@@ -6,13 +6,13 @@ namespace RetryKeepsResources;
 /// <summary>Why the game is about to lay a level out (mirrors the game's LoadMode).</summary>
 public enum FloorLoad
 {
-    /// <summary>LoadMode.kNewGame: a new run started from the base.</summary>
+    /// <summary>A new run started from the base, not an end-screen Retry.</summary>
     NewRun,
     /// <summary>LoadMode.kLoad: a saved run is being continued.</summary>
     Continue,
     /// <summary>LoadMode.kUndo: the current run is rewound.</summary>
     Undo,
-    /// <summary>LoadMode.kResetFloor: Retry / Restart - the run is thrown away and started again.</summary>
+    /// <summary>A Retry / Restart load that should bank the tracked run's haul.</summary>
     Retry,
 }
 
@@ -32,10 +32,8 @@ public enum RunScreen
 /// <summary>
 /// Game-independent bookkeeping for the resources gathered in the current run ("haul").
 ///
-/// The haul is copied from the run's save data while the run is played. As soon as the game moves to a
-/// screen Retry/Restart can be pressed from, the copy is frozen, so whatever the game does to its own run data
-/// after the button is pressed (resetting it to zero) can't change what we bank. When the floor is then
-/// reset, <see cref="FloorLoading"/> hands the frozen haul back exactly once.
+/// The haul is copied from the run's save data while the run is played and continues updating on the end screen
+/// until loading starts. When the floor is then reset, <see cref="FloorLoading"/> hands the final haul back exactly once.
 /// </summary>
 public sealed class HaulTracker
 {
@@ -44,6 +42,7 @@ public sealed class HaulTracker
     bool _live;
     bool _frozen;
     bool _runEnded;
+    bool _acceptObservations;
 
     /// <summary>Also bank when Restart is pressed in the middle of a run (pause menu), not only after it ended.</summary>
     public bool BankMidRunRestarts { get; set; } = true;
@@ -51,7 +50,17 @@ public sealed class HaulTracker
     public bool IsLive => _live;
     public bool IsFrozen => _frozen;
     public bool RunEnded => _runEnded;
+    public bool CanObserve => _acceptObservations;
     public int[] Haul => (int[])_haul.Clone();
+
+    public void ReturnedToBase()
+    {
+        _live = false;
+        _frozen = false;
+        _runEnded = false;
+        _acceptObservations = false;
+        _haul = Array.Empty<int>();
+    }
 
     /// <summary>A level has been laid out: start tracking the run identified by <paramref name="runId"/>.</summary>
     public void FloorLoaded(long runId, IReadOnlyList<int> amounts)
@@ -60,13 +69,14 @@ public sealed class HaulTracker
         _runId = runId;
         _frozen = false;
         _runEnded = false;
+        _acceptObservations = true;
         _haul = Copy(amounts);
     }
 
-    /// <summary>Per-frame reading of the run's resources. Ignored while frozen or for another run's data.</summary>
+    /// <summary>Per-frame reading of the run's resources. Ignored outside the observation window or for another run.</summary>
     public void Observe(long runId, IReadOnlyList<int> amounts)
     {
-        if (!_live || _frozen || runId != _runId || amounts == null)
+        if (!_live || !_acceptObservations || runId != _runId || amounts == null)
             return;
         _haul = Copy(amounts);
     }
@@ -82,16 +92,23 @@ public sealed class HaulTracker
             case RunScreen.Active:
                 _frozen = false;
                 _runEnded = false;
+                _acceptObservations = true;
                 break;
             case RunScreen.Paused:
+                _acceptObservations = true;
+                Observe(runId, amounts);
+                _frozen = true;
+                break;
             case RunScreen.RunOver:
-                Observe(runId, amounts); // last reading before freezing; no-op if already frozen
+                _acceptObservations = true;
+                Observe(runId, amounts); // refresh the haul as end-screen pickups finish
                 _frozen = true;
                 if (screen == RunScreen.RunOver)
                     _runEnded = true;
                 break;
             case RunScreen.Loading:
                 _frozen = true;
+                _acceptObservations = false;
                 break;
         }
     }
@@ -120,6 +137,7 @@ public sealed class HaulTracker
         _live = false;
         _frozen = false;
         _runEnded = false;
+        _acceptObservations = false;
         _haul = Array.Empty<int>();
         return bank;
     }

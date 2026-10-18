@@ -15,8 +15,8 @@ namespace RetryKeepsResources;
 // How:
 // - The run's haul is BattleSaveData.I.NumResources (a Cost; Num[] is indexed by ResourceType). It is copied every
 //   frame and frozen as soon as the game reaches a screen Retry/Restart can be pressed from (see HaulTracker).
-// - Retry/Restart lays the level out again through GridMgr.InitGrid(LoadMode.kResetFloor); a new run from the base
-//   uses kNewGame instead (and the game banks that run's haul itself), so only kResetFloor banks anything.
+// - Retry/Restart lays the level out again through GridMgr.InitGrid. An end-screen Retry can arrive as kNewGame,
+//   so that mode is treated as Retry only while the previous run is still tracked and frozen or ended.
 // - The haul is added on the next frame with the game's own SaveMgr.AddResources(..., saveGame: true).
 //   SaveMgr's resource methods are only ever CALLED, never Harmony-patched: patching them is known to freeze the game.
 [BepInPlugin(PluginInfo.Guid, PluginInfo.Name, PluginInfo.Version)]
@@ -143,7 +143,7 @@ public class RetryKeepsResourcesBehaviour : MonoBehaviour
     {
         try
         {
-            if (Plugin.Tracker.IsLive && !Plugin.Tracker.IsFrozen)
+            if (Plugin.Tracker.IsLive && Plugin.Tracker.CanObserve)
             {
                 var (runId, amounts) = Plugin.ReadRun();
                 Plugin.Tracker.Observe(runId, amounts);
@@ -173,12 +173,24 @@ internal static class SetStatePatch
                 _ => RunScreen.Active,
             };
             var (runId, amounts) = screen is RunScreen.Paused or RunScreen.RunOver ? Plugin.ReadRun() : (0, null);
+            if (screen != RunScreen.Active)
+                Plugin.Logger.LogInfo($"Game state: {screen}; run={runId}; resources=[{(amounts == null ? "unavailable" : string.Join(", ", amounts))}].");
             Plugin.Tracker.StateChanging(screen, runId, amounts);
         }
         catch (Exception ex)
         {
             Plugin.Logger.LogError("SetState hook failed: " + ex);
         }
+    }
+}
+
+ [HarmonyPatch(typeof(BaseMgr), "Start")]
+internal static class BaseMgrStartPatch
+{
+    static void Postfix()
+    {
+        Plugin.Tracker.ReturnedToBase();
+        Plugin.Logger.LogInfo("Returned to base; cleared previous run tracking.");
     }
 }
 
@@ -190,17 +202,26 @@ internal static class InitGridPatch
     {
         try
         {
+            Plugin.Tracker.BankMidRunRestarts = Plugin.BankMidRunRestarts.Value;
+            bool wasTracking = Plugin.Tracker.IsLive;
+            bool runEnded = Plugin.Tracker.RunEnded;
+            bool wasFrozen = Plugin.Tracker.IsFrozen;
+            bool bankMidRunRestarts = Plugin.BankMidRunRestarts.Value;
+            bool enabled = Plugin.Enabled.Value;
             var load = __0 switch
             {
                 LoadMode.kResetFloor => FloorLoad.Retry,
                 LoadMode.kLoad => FloorLoad.Continue,
                 LoadMode.kUndo => FloorLoad.Undo,
+                LoadMode.kNewGame when runEnded || (wasTracking && wasFrozen && bankMidRunRestarts) => FloorLoad.Retry,
                 _ => FloorLoad.NewRun,
             };
-            Plugin.Tracker.BankMidRunRestarts = Plugin.BankMidRunRestarts.Value;
             var bank = Plugin.Tracker.FloorLoading(load);
-            if (bank != null && Plugin.Enabled.Value)
+            if (bank != null && enabled)
                 Plugin.QueueBank(bank);
+            Plugin.Logger.LogInfo($"InitGrid: gameMode={__0} ({(int)__0}); load={load}; tracking={wasTracking}; runEnded={runEnded}; " +
+                $"bankMidRun={Plugin.BankMidRunRestarts.Value}; enabled={enabled}; " +
+                $"haul={(bank == null ? "none" : string.Join(", ", bank))}{(bank != null && !enabled ? " (disabled)" : "")}.");
         }
         catch (Exception ex)
         {
@@ -214,6 +235,7 @@ internal static class InitGridPatch
         {
             var (runId, amounts) = Plugin.ReadRun();
             Plugin.Tracker.FloorLoaded(runId, amounts);
+            Plugin.Logger.LogInfo($"InitGrid complete: tracking run={runId}; resources=[{(amounts == null ? "unavailable" : string.Join(", ", amounts))}].");
         }
         catch (Exception ex)
         {
