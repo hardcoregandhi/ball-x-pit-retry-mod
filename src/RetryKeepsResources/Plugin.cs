@@ -45,8 +45,9 @@ public class Plugin : BasePlugin
         }
         catch (Exception ex)
         {
-            harmony.UnpatchSelf(); // no half-patched state
             Logger.LogError("Patching failed, the mod is inactive (game update?): " + ex);
+            try { harmony.UnpatchSelf(); } // no half-patched state
+            catch (Exception unpatchEx) { Logger.LogError("Undoing the patches failed: " + unpatchEx); }
             return;
         }
 
@@ -75,7 +76,7 @@ public class Plugin : BasePlugin
     {
         if (_pendingBank == null)
         {
-            _pendingBank = amounts;
+            _pendingBank = (int[])amounts.Clone();
             return;
         }
         if (_pendingBank.Length < amounts.Length)
@@ -105,6 +106,7 @@ public class Plugin : BasePlugin
             try
             {
                 // The game stores resources as Int32: never add past int.MaxValue (it would wrap negative).
+                // Gold has its own getter (SaveMgr.GetNumGold), the other resources go through GetNumResources.
                 long current = type == ResourceType.kGold ? save.GetNumGold() : save.GetNumResources(type);
                 int amount = (int)Math.Min(amounts[i], int.MaxValue - Math.Clamp(current, 0L, int.MaxValue));
                 if (amount < amounts[i])
