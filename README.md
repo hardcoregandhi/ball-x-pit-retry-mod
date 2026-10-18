@@ -37,7 +37,7 @@ you can retry straight away without losing anything.
 
 ## Build
 
-You need the [.NET SDK](https://dotnet.microsoft.com/download) 6 or newer, and the game with BepInEx 6 installed and
+You need the [.NET SDK](https://dotnet.microsoft.com/download) 8 or newer, and the game with BepInEx 6 installed and
 started once (that generates `BepInEx\interop`). No game files are included in this repository.
 
 ```powershell

@@ -38,18 +38,20 @@ public class Plugin : BasePlugin
             "Also bank when you Restart from the pause menu in the middle of a run. " +
             "false = only bank when Retry is pressed after the run has ended (game over or level complete).");
 
-        ClassInjector.RegisterTypeInIl2Cpp<RetryKeepsResourcesBehaviour>();
-        AddComponent<RetryKeepsResourcesBehaviour>();
-
+        var harmony = new Harmony(PluginInfo.Guid);
         try
         {
-            new Harmony(PluginInfo.Guid).PatchAll(typeof(Plugin).Assembly);
+            harmony.PatchAll(typeof(Plugin).Assembly);
         }
         catch (Exception ex)
         {
+            harmony.UnpatchSelf(); // no half-patched state
             Logger.LogError("Patching failed, the mod is inactive (game update?): " + ex);
             return;
         }
+
+        ClassInjector.RegisterTypeInIl2Cpp<RetryKeepsResourcesBehaviour>();
+        AddComponent<RetryKeepsResourcesBehaviour>();
 
         Logger.LogInfo($"{PluginInfo.Name} {PluginInfo.Version} loaded.");
     }
@@ -105,6 +107,8 @@ public class Plugin : BasePlugin
                 // The game stores resources as Int32: never add past int.MaxValue (it would wrap negative).
                 long current = type == ResourceType.kGold ? save.GetNumGold() : save.GetNumResources(type);
                 int amount = (int)Math.Min(amounts[i], int.MaxValue - Math.Clamp(current, 0L, int.MaxValue));
+                if (amount < amounts[i])
+                    Logger.LogWarning($"{type} is at the game's maximum: only {amount} of {amounts[i]} could be banked.");
                 if (amount <= 0)
                     continue;
                 save.AddResources(type, amount, true, false);

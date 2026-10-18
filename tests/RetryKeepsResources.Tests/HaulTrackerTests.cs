@@ -157,6 +157,27 @@ public class HaulTrackerTests
         Assert.Equal(Haul, t.FloorLoading(FloorLoad.Retry));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RestartStraightIntoLoading_BanksOnlyWhenMidRunRestartsEnabled(bool bankMidRun)
+    {
+        var t = StartedRun();
+        t.BankMidRunRestarts = bankMidRun;
+        t.Observe(Run, Haul);
+
+        // Restart without a pause/game-over state change first: Loading freezes without reading the run data.
+        t.StateChanging(RunScreen.Loading, Run, Zero);
+        Assert.True(t.IsFrozen);
+        t.Observe(Run, Zero);
+
+        var bank = t.FloorLoading(FloorLoad.Retry);
+        if (bankMidRun)
+            Assert.Equal(Haul, bank);
+        else
+            Assert.Null(bank);
+    }
+
     [Fact]
     public void ResumingPlay_UnfreezesAndClearsRunEnded()
     {
